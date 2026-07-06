@@ -39,6 +39,14 @@ function fitWithin(width, height, maxWidth, maxHeight) {
   };
 }
 
+export function computeUpscaleTarget(sourceWidth, sourceHeight, target = '4k') {
+  const preset = TARGET_PRESETS[target];
+  if (!preset) {
+    throw new Error(`Unknown upscale target "${target}".`);
+  }
+  return preset.compute(sourceWidth, sourceHeight);
+}
+
 function buildUpscaleLabel(method, source, target) {
   const src = `${source.width}×${source.height}`;
   const dst = `${target.width}×${target.height}`;
@@ -164,9 +172,9 @@ function runFfmpegEncodeFromFrames(framesDir, outputPath, fps, audioSourcePath) 
 
 function upscaleWithFfmpeg(inputPath, outputPath, targetWidth, targetHeight, { useGpu = false } = {}) {
   return new Promise((resolve, reject) => {
-    const run = (gpu) => {
+    const run = (gpuScale, nvenc) => {
       const chain = ffmpeg(inputPath);
-      if (gpu) {
+      if (gpuScale) {
         chain.videoFilters([`scale_cuda=${targetWidth}:${targetHeight}`]);
       } else {
         chain.videoFilters([
@@ -174,20 +182,29 @@ function upscaleWithFfmpeg(inputPath, outputPath, targetWidth, targetHeight, { u
           'unsharp=5:5:0.6:5:5:0.0',
         ]);
       }
+
+      const codec = nvenc
+        ? ['-c:v', 'h264_nvenc', '-preset', 'p1', '-rc', 'vbr', '-cq', '19']
+        : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18'];
+
       chain
-        .outputOptions(['-c:v libx264', '-preset fast', '-crf 18', '-c:a copy'])
+        .outputOptions([...codec, '-c:a', 'copy', '-pix_fmt', 'yuv420p'])
         .output(outputPath)
-        .on('end', () => resolve(gpu ? 'ffmpeg_cuda' : 'ffmpeg_lanczos'))
-        .on('error', (err) => {
-          if (gpu) {
-            run(false);
+        .on('end', () => resolve(gpuScale ? 'ffmpeg_cuda' : 'ffmpeg_lanczos'))
+        .on('error', () => {
+          if (nvenc) {
+            run(gpuScale, false);
             return;
           }
-          reject(err);
+          if (gpuScale) {
+            run(false, false);
+            return;
+          }
+          reject(new Error('FFmpeg upscale failed'));
         })
         .run();
     };
-    run(useGpu);
+    run(useGpu, true);
   });
 }
 

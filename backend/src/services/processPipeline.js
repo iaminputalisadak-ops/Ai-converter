@@ -3,7 +3,7 @@ import { detectPlatform, isValidUrl } from '../utils/platform.js';
 import { fetchVideoMetadata, resolveDownloadUrl } from './videoService.js';
 import { downloadToFile, extractMetadata, runAiPipeline } from './ffmpegService.js';
 import { processVideoExport } from './mediaProcessingService.js';
-import { upscaleVideo, checkUpscaleAvailability } from './upscaleService.js';
+import { upscaleVideo, checkUpscaleAvailability, computeUpscaleTarget } from './upscaleService.js';
 import {
   createJob,
   setJobStep,
@@ -100,6 +100,76 @@ async function runPipeline(jobId, payload) {
   let workingPath = localPath;
   let upscaleResult = null;
 
+  const filterPreset = modifications.filters?.preset || 'none';
+  const audioOptions = modifications.audio || {};
+  const needsExport =
+    applyWatermark || filterPreset !== 'none' || audioOptions.enabled;
+  const isFastUpscale =
+    modifications.upscale?.enabled === true && modifications.upscale.mode === 'fast';
+
+  if (isFastUpscale && needsExport) {
+    const target = (modifications.upscale.target || '4k').toUpperCase();
+    const sourceW = fileMetadata.video?.width;
+    const sourceH = fileMetadata.video?.height;
+    let upscaleStatus = { gpu: false, device: 'cpu' };
+    try {
+      upscaleStatus = await checkUpscaleAvailability();
+    } catch {
+      // keep defaults
+    }
+
+    const targetDims =
+      sourceW && sourceH
+        ? computeUpscaleTarget(sourceW, sourceH, modifications.upscale.target || '4k')
+        : null;
+
+    setJobStep(
+      jobId,
+      'upscale',
+      'running',
+      `Single-pass encode: scale to ${target}, filter & watermark on GPU…`
+    );
+
+    const processed = await processVideoExport(localPath, {
+      applyWatermark,
+      filterPreset,
+      audio: audioOptions,
+      scaleTo: targetDims,
+    });
+
+    workingPath = processed.outputPath;
+    upscaleResult = {
+      skipped: false,
+      method: 'ffmpeg_merged',
+      label: targetDims
+        ? `Fast upscale to ${targetDims.width}×${targetDims.height} (single pass)`
+        : `Fast upscale to ${target} (single pass)`,
+      target: targetDims,
+      outputPath: processed.outputPath,
+      outputFilename: processed.outputFilename,
+    };
+
+    setJobStep(jobId, 'upscale', 'completed', upscaleResult.label);
+    setJobStep(jobId, 'export', 'completed', 'Filter, music, and watermark applied');
+
+    const result = {
+      jobId,
+      platform: platform.id,
+      fileMetadata,
+      aiPipeline: aiResult,
+      upscale: upscaleResult,
+      ...processed,
+      appliedFilter: processed.appliedFilter,
+      appliedMusic: processed.appliedMusic,
+      outputMetadata: await extractMetadata(processed.outputPath),
+    };
+
+    setJobStep(jobId, 'finalize', 'running', 'Saving final file…');
+    setJobStep(jobId, 'finalize', 'completed');
+    completeJob(jobId, result);
+    return;
+  }
+
   if (modifications.upscale?.enabled === true) {
     const target = (modifications.upscale.target || '4k').toUpperCase();
     const isFast = modifications.upscale.mode === 'fast';
@@ -141,10 +211,10 @@ async function runPipeline(jobId, payload) {
     );
   }
 
-  const filterPreset = modifications.filters?.preset || 'none';
-  const audioOptions = modifications.audio || {};
-  const needsExport =
-    applyWatermark || filterPreset !== 'none' || audioOptions.enabled;
+  const filterPresetAfterUpscale = modifications.filters?.preset || 'none';
+  const audioOptionsAfterUpscale = modifications.audio || {};
+  const needsExportAfterUpscale =
+    applyWatermark || filterPresetAfterUpscale !== 'none' || audioOptionsAfterUpscale.enabled;
 
   setJobStep(jobId, 'export', 'running', 'Encoding video with your selected options…');
 
@@ -156,11 +226,11 @@ async function runPipeline(jobId, payload) {
     upscale: upscaleResult,
   };
 
-  if (needsExport) {
+  if (needsExportAfterUpscale) {
     const processed = await processVideoExport(workingPath, {
       applyWatermark,
-      filterPreset,
-      audio: audioOptions,
+      filterPreset: filterPresetAfterUpscale,
+      audio: audioOptionsAfterUpscale,
     });
     result = {
       ...result,

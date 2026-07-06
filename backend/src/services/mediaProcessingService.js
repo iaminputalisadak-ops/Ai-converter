@@ -56,13 +56,27 @@ function resolveMusicPath(trackId) {
   return musicPath;
 }
 
-function buildFilterGraph({ videoFilters, hasWatermark, musicOptions, hasOriginalAudio }) {
+function buildFilterGraph({
+  videoFilters,
+  hasWatermark,
+  musicOptions,
+  hasOriginalAudio,
+  scaleTo = null,
+}) {
   const filters = [];
   let videoOut = '0:v';
   let audioOut = null;
 
+  if (scaleTo) {
+    filters.push(
+      `[0:v]scale=${scaleTo.width}:${scaleTo.height}:flags=lanczos[vscaled]`
+    );
+    videoOut = 'vscaled';
+  }
+
   if (videoFilters.length > 0) {
-    filters.push(`[0:v]${videoFilters.join(',')}[vfx]`);
+    const input = videoOut === '0:v' ? '[0:v]' : `[${videoOut}]`;
+    filters.push(`${input}${videoFilters.join(',')}[vfx]`);
     videoOut = 'vfx';
   }
 
@@ -99,6 +113,7 @@ export function processVideoExport(inputPath, options = {}) {
     applyWatermark = true,
     filterPreset = 'none',
     audio = {},
+    scaleTo = null,
   } = options;
 
   const preset = FILTER_PRESETS[filterPreset] || FILTER_PRESETS.none;
@@ -116,6 +131,7 @@ export function processVideoExport(inputPath, options = {}) {
           hasWatermark,
           musicOptions: musicEnabled ? audio : null,
           hasOriginalAudio,
+          scaleTo,
         });
 
         const runExport = (nvenc) => {
@@ -161,6 +177,13 @@ export function processVideoExport(inputPath, options = {}) {
 
           if (filterPreset !== 'none') {
             outputOptions.push('-metadata', `description=filter:${filterPreset}`);
+          }
+
+          if (scaleTo) {
+            outputOptions.push(
+              '-metadata',
+              `synopsis=upscaled:${scaleTo.width}x${scaleTo.height}`
+            );
           }
 
           if (musicEnabled) {

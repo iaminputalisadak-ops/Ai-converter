@@ -19,7 +19,7 @@ export function estimateProcessingMs(options = {}) {
 
   if (upscale?.enabled) {
     if (upscale.mode === 'fast') {
-      seconds += duration * 0.5;
+      seconds += duration * 0.35;
     } else if (upscale.gpuAvailable) {
       seconds += duration * (upscale.target === '8k' ? 2.5 : upscale.target === '4k' ? 1.8 : 1.2);
     } else {

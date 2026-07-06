@@ -45,6 +45,8 @@ function pickDefaultTrack(tracks) {
   if (!tracks?.length) return null;
   return tracks.find((t) => t.id === DEFAULT_MUSIC_TRACK) || tracks[0];
 }
+
+function formatElapsed(ms) {
   if (!ms) return '0s';
   const totalSec = Math.floor(ms / 1000);
   const m = Math.floor(totalSec / 60);

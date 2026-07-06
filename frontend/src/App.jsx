@@ -3,6 +3,7 @@ import {
   fetchMetadata,
   getDownloadUrl,
   processVideo,
+  waitForJob,
   fetchUpscaleStatus,
   fetchMusicTracks,
   fetchFilterPresets,
@@ -38,12 +39,21 @@ function aiTargetFromItag(itag) {
   return String(itag).replace(/^ai-/, '');
 }
 
+function formatElapsed(ms) {
+  if (!ms) return '0s';
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 export default function App() {
   const [url, setUrl] = useState('');
   const [metadata, setMetadata] = useState(null);
   const [selectedItag, setSelectedItag] = useState('');
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [jobStatus, setJobStatus] = useState(null);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
@@ -51,7 +61,7 @@ export default function App() {
     styleTransfer: false,
     frameInterpolation: false,
     objectDetection: false,
-    upscale: { enabled: false, target: '4k' },
+    upscale: { enabled: false, target: '4k', mode: 'fast' },
     filters: { preset: 'none' },
     audio: {
       enabled: false,
@@ -108,16 +118,24 @@ export default function App() {
   async function handleProcess() {
     setError('');
     setResult(null);
+    setJobStatus(null);
     setProcessing(true);
 
     try {
-      const data = await processVideo({
+      const { jobId } = await processVideo({
         url: url.trim(),
         itag: getSourceItag(),
         modifications: getProcessModifications(),
         applyWatermark,
       });
+
+      const data = await waitForJob(jobId, {
+        onUpdate: setJobStatus,
+        pollMs: 1000,
+      });
+
       setResult(data);
+      setJobStatus((prev) => (prev ? { ...prev, status: 'completed', progress: 100 } : prev));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -175,7 +193,7 @@ export default function App() {
     if (isAiQuality(itag)) {
       setModifications((prev) => ({
         ...prev,
-        upscale: { enabled: true, target: aiTargetFromItag(itag) },
+        upscale: { enabled: true, target: aiTargetFromItag(itag), mode: prev.upscale.mode || 'fast' },
       }));
     } else {
       setModifications((prev) => ({
@@ -219,6 +237,39 @@ export default function App() {
       </form>
 
       {error && <div className="error-banner">{error}</div>}
+
+      {processing && jobStatus && (
+        <div className="progress-card">
+          <div className="progress-header">
+            <h3>Processing video</h3>
+            <span className="progress-pct">{jobStatus.progress}%</span>
+          </div>
+          <div className="progress-bar">
+            <div className="progress-fill" style={{ width: `${jobStatus.progress}%` }} />
+          </div>
+          <p className="progress-message">{jobStatus.message}</p>
+          <div className="progress-times">
+            <span>Elapsed: {formatElapsed(jobStatus.elapsedMs)}</span>
+            {jobStatus.status === 'running' && (
+              <span>Est. remaining: {jobStatus.etaLabel}</span>
+            )}
+          </div>
+          <ul className="progress-steps">
+            {jobStatus.steps?.map((step) => (
+              <li key={step.id} className={`progress-step progress-step--${step.status}`}>
+                <span className="step-icon">
+                  {step.status === 'completed' ? '✓' : step.status === 'running' ? '●' : '○'}
+                </span>
+                <span>{step.label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {processing && !jobStatus && (
+        <div className="loading">Starting processing job…</div>
+      )}
 
       {loading && <div className="loading">Fetching video metadata…</div>}
 
@@ -275,13 +326,31 @@ export default function App() {
                   <strong>{selectedAiOption?.label}</strong>
                   <p>
                     Instagram/TikTok don&apos;t offer native 8K. This downloads the best source
-                    ({metadata.formats[0]?.quality}) then AI-upscales to your target. Output is
-                    labeled as AI-enhanced.
+                    ({metadata.formats[0]?.quality}) then upscales to your target.
                   </p>
+                  <div className="speed-mode">
+                    <label htmlFor="upscale-mode">Upscale speed</label>
+                    <select
+                      id="upscale-mode"
+                      className="quality-select"
+                      value={modifications.upscale.mode}
+                      onChange={(e) =>
+                        setModifications((prev) => ({
+                          ...prev,
+                          upscale: { ...prev.upscale, mode: e.target.value },
+                        }))
+                      }
+                    >
+                      <option value="fast">Fast — FFmpeg (~10–60 sec, good for CPU)</option>
+                      <option value="ai">AI Quality — Real-ESRGAN (best detail, very slow on CPU)</option>
+                    </select>
+                  </div>
                   <p className="quality-note">
-                    {upscaleStatus?.realesrganService || upscaleStatus?.realesrganCli
-                      ? 'Using Real-ESRGAN neural upscaling.'
-                      : 'Real-ESRGAN not running — FFmpeg Lanczos fallback will be used (start ai-pipeline/upscale for better quality).'}
+                    {modifications.upscale.mode === 'fast'
+                      ? 'Fast mode resizes with FFmpeg Lanczos — finishes in seconds, not true AI detail.'
+                      : upscaleStatus?.gpu
+                        ? 'GPU detected — AI Quality mode is recommended.'
+                        : 'No GPU detected — AI Quality can take 10–30+ min for short reels on CPU. Use Fast mode to finish quickly.'}
                   </p>
                 </div>
               )}

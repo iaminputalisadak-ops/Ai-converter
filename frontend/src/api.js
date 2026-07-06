@@ -33,6 +33,25 @@ export async function processVideo({ url, itag, modifications, applyWatermark })
   return data;
 }
 
+export async function fetchJobStatus(jobId) {
+  const res = await fetch(`${API_BASE}/job/${jobId}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch job status');
+  return data;
+}
+
+export async function waitForJob(jobId, { onUpdate, pollMs = 1000 } = {}) {
+  while (true) {
+    const job = await fetchJobStatus(jobId);
+    onUpdate?.(job);
+
+    if (job.status === 'completed') return job.result;
+    if (job.status === 'failed') throw new Error(job.error || 'Processing failed');
+
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
+
 export async function fetchUpscaleStatus() {
   const res = await fetch(`${API_BASE}/upscale-status`);
   const data = await res.json();

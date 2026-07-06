@@ -20,6 +20,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
@@ -27,6 +28,7 @@ app = FastAPI(title="Real-ESRGAN Upscale Service")
 
 WEIGHTS_DIR = Path(__file__).parent / "weights"
 DEFAULT_MODEL = WEIGHTS_DIR / "RealESRGAN_x4plus.pth"
+USE_GPU = torch.cuda.is_available()
 
 
 def upscale_with_realesrgan(input_path: Path, output_path: Path, scale: int) -> None:
@@ -51,10 +53,10 @@ def upscale_with_realesrgan(input_path: Path, output_path: Path, scale: int) -> 
         scale=4,
         model_path=str(DEFAULT_MODEL),
         model=model,
-        tile=256,
+        tile=512 if USE_GPU else 256,
         tile_pad=10,
         pre_pad=0,
-        half=True,
+        half=USE_GPU,
     )
 
     import cv2
@@ -136,6 +138,8 @@ def health():
         "status": "ok",
         "model_exists": DEFAULT_MODEL.exists(),
         "ffmpeg": shutil.which("ffmpeg") is not None,
+        "gpu": USE_GPU,
+        "device": torch.cuda.get_device_name(0) if USE_GPU else "cpu",
     }
 
 

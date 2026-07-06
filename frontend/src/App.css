@@ -156,6 +156,18 @@
   color: var(--accent);
 }
 
+.speed-mode {
+  margin: 0.75rem 0 0.5rem;
+}
+
+.speed-mode label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+
 .ai-quality-banner {
   background: rgba(91, 141, 239, 0.1);
   border: 1px solid var(--accent);
@@ -185,6 +197,94 @@
 .resolution-source {
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.progress-card {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.progress-header h3 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.progress-pct {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.progress-bar {
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #7aa3f5);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.progress-message {
+  font-size: 0.9rem;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+
+.progress-times {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 1rem;
+}
+
+.progress-steps {
+  list-style: none;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.progress-step--running {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.progress-step--completed {
+  color: var(--success);
+}
+
+.progress-step--failed {
+  color: var(--error);
+}
+
+.step-icon {
+  width: 1rem;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .platform-badge {

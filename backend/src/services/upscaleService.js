@@ -47,7 +47,15 @@ function buildUpscaleLabel(method, source, target) {
     return `AI-upscaled (Real-ESRGAN) from ${src} to ${dst}`;
   }
 
-  return `Enhanced upscale (FFmpeg Lanczos) from ${src} to ${dst} — not true AI super-resolution`;
+  if (method === 'realesrgan+ffmpeg') {
+    return `AI-upscaled (Real-ESRGAN + FFmpeg) from ${src} to ${dst}`;
+  }
+
+  if (method === 'ffmpeg_lanczos') {
+    return `Fast upscale (FFmpeg Lanczos) from ${src} to ${dst} — quick, not AI-enhanced`;
+  }
+
+  return `Enhanced upscale from ${src} to ${dst}`;
 }
 
 async function tryRealesrganService(inputPath, outputPath, scale) {
@@ -177,7 +185,7 @@ function inferScaleFactor(sourceWidth, targetWidth) {
 }
 
 export async function upscaleVideo(inputPath, options = {}) {
-  const { target = '4k' } = options;
+  const { target = '4k', mode = 'ai' } = options;
   const preset = TARGET_PRESETS[target];
 
   if (!preset) {
@@ -210,25 +218,73 @@ export async function upscaleVideo(inputPath, options = {}) {
 
   let method = null;
 
-  try {
-    method = await tryRealesrganService(inputPath, outputPath, scale);
-  } catch (err) {
-    console.warn('Real-ESRGAN service unavailable, trying fallback:', err.message);
-  }
-
-  if (!method) {
+  if (mode === 'fast') {
+    method = await upscaleWithFfmpeg(inputPath, outputPath, targetDims.width, targetDims.height);
+  } else {
     try {
-      method = await tryRealesrganCli(inputPath, outputPath, scale);
+      method = await tryRealesrganService(inputPath, outputPath, scale);
     } catch (err) {
-      console.warn('Real-ESRGAN CLI unavailable, using FFmpeg:', err.message);
+      console.warn('Real-ESRGAN service unavailable, trying fallback:', err.message);
+    }
+
+    if (!method) {
+      try {
+        method = await tryRealesrganCli(inputPath, outputPath, scale);
+      } catch (err) {
+        console.warn('Real-ESRGAN CLI unavailable, using FFmpeg:', err.message);
+      }
+    }
+
+    if (!method) {
+      method = await upscaleWithFfmpeg(inputPath, outputPath, targetDims.width, targetDims.height);
+    } else {
+      const aiMeta = await extractMetadata(outputPath);
+      const needsFinalScale =
+        aiMeta.video?.width !== targetDims.width || aiMeta.video?.height !== targetDims.height;
+      if (needsFinalScale) {
+        const scaledPath = path.join(config.processedDir, `scaled-${uuidv4()}.mp4`);
+        await upscaleWithFfmpeg(outputPath, scaledPath, targetDims.width, targetDims.height);
+        method = 'realesrgan+ffmpeg';
+        const { unlink } = await import('fs/promises');
+        await unlink(outputPath).catch(() => {});
+        const finalMeta = await extractMetadata(scaledPath);
+        return buildUpscaleResult({
+          method,
+          target,
+          sourceWidth,
+          sourceHeight,
+          targetDims,
+          outputPath: scaledPath,
+          outputFilename: path.basename(scaledPath),
+          outputMeta: finalMeta,
+        });
+      }
     }
   }
 
-  if (!method) {
-    method = await upscaleWithFfmpeg(inputPath, outputPath, targetDims.width, targetDims.height);
-  }
-
   const outputMeta = await extractMetadata(outputPath);
+  return buildUpscaleResult({
+    method,
+    target,
+    sourceWidth,
+    sourceHeight,
+    targetDims,
+    outputPath,
+    outputFilename,
+    outputMeta,
+  });
+}
+
+function buildUpscaleResult({
+  method,
+  target,
+  sourceWidth,
+  sourceHeight,
+  targetDims,
+  outputPath,
+  outputFilename,
+  outputMeta,
+}) {
   const label = buildUpscaleLabel(method, { width: sourceWidth, height: sourceHeight }, targetDims);
 
   return {
@@ -252,13 +308,30 @@ export async function checkUpscaleAvailability() {
     ffmpeg: true,
     realesrganService: Boolean(config.aiUpscaleUrl),
     realesrganCli: Boolean(config.realesrganBin && existsSync(config.realesrganBin)),
+    gpu: false,
+    device: 'cpu',
   };
 
-  status.recommendedMethod = status.realesrganService
+  if (config.aiUpscaleUrl) {
+    try {
+      const res = await fetch(`${config.aiUpscaleUrl}/health`);
+      const health = await res.json();
+      status.gpu = Boolean(health.gpu);
+      status.device = health.device || 'cpu';
+    } catch {
+      // service unreachable
+    }
+  }
+
+  status.recommendedMethod = status.gpu
     ? 'realesrgan_service'
-    : status.realesrganCli
-      ? 'realesrgan_cli'
+    : status.realesrganService
+      ? 'realesrgan_service_cpu_slow'
       : 'ffmpeg_lanczos';
+
+  status.speedTip = status.gpu
+    ? 'GPU detected — AI quality mode is recommended.'
+    : 'No GPU detected — use Fast mode for 8K in seconds, or AI Quality for best results (much slower on CPU).';
 
   return status;
 }

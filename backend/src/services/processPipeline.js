@@ -2,8 +2,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { detectPlatform, isValidUrl } from '../utils/platform.js';
 import { fetchVideoMetadata, resolveDownloadUrl } from './videoService.js';
 import { downloadToFile, extractMetadata, runAiPipeline } from './ffmpegService.js';
-import { processVideoExport } from './mediaProcessingService.js';
+import { processVideoExport, listMusicTracks } from './mediaProcessingService.js';
 import { upscaleVideo, checkUpscaleAvailability, computeUpscaleTarget } from './upscaleService.js';
+import { validateExportOptions } from './exportValidation.js';
 import {
   createJob,
   setJobStep,
@@ -21,6 +22,11 @@ export async function startProcessingJob(payload) {
 
   if (!url || !isValidUrl(url)) {
     throw new Error('A valid HTTP/HTTPS URL is required.');
+  }
+
+  const validationErrors = validateExportOptions({ modifications, applyWatermark });
+  if (validationErrors.length > 0) {
+    throw new Error(validationErrors[0]);
   }
 
   let durationSeconds = 30;

@@ -114,6 +114,19 @@ export default function App() {
 
   async function handleProcess() {
     setError('');
+
+    if (modifications.audio.enabled && musicTracks.length === 0) {
+      setError(
+        'Background music is on, but no MP3 files were found. Add tracks to backend/assets/music/ and click Get Info again.'
+      );
+      return;
+    }
+
+    if (modifications.audio.enabled && !modifications.audio.track) {
+      setError('Select a music track from the dropdown.');
+      return;
+    }
+
     setResult(null);
     setJobStatus(null);
     setProcessing(true);
@@ -403,9 +416,16 @@ export default function App() {
                     type="checkbox"
                     checked={modifications.audio.enabled}
                     onChange={toggleBackgroundMusic}
+                    disabled={musicTracks.length === 0}
                   />
                   Add background music
                 </label>
+                {modifications.audio.enabled && musicTracks.length === 0 && (
+                  <p className="quality-note error-note">
+                    No music files found. Add MP3s to <code>backend/assets/music/</code> and click
+                    Get Info to refresh.
+                  </p>
+                )}
                 {modifications.audio.enabled && (
                   <div className="audio-options">
                     {musicTracks.length > 0 ? (
@@ -522,6 +542,12 @@ export default function App() {
               <>
                 <dt>Filter</dt>
                 <dd>{result.appliedFilter}</dd>
+              </>
+            )}
+            {result.appliedWatermark && (
+              <>
+                <dt>Watermark</dt>
+                <dd>Applied</dd>
               </>
             )}
             {result.appliedMusic && (

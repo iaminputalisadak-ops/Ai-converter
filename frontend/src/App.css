@@ -126,6 +126,10 @@
   line-height: 1.45;
 }
 
+.error-note {
+  color: #f87171;
+}
+
 .option-block label {
   display: block;
   font-size: 0.875rem;

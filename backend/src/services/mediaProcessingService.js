@@ -59,9 +59,11 @@ function resolveMusicPath(trackId) {
 function buildFilterGraph({
   videoFilters,
   hasWatermark,
+  useTextWatermark,
   musicOptions,
   hasOriginalAudio,
   scaleTo = null,
+  watermarkLabel = 'converter',
 }) {
   const filters = [];
   let videoOut = '0:v';
@@ -83,6 +85,16 @@ function buildFilterGraph({
   if (hasWatermark) {
     const wmIn = videoOut === '0:v' ? '[0:v]' : `[${videoOut}]`;
     filters.push(`${wmIn}[1:v]overlay=W-w-20:H-h-20[vout]`);
+    videoOut = 'vout';
+  } else if (useTextWatermark) {
+    const wmIn = videoOut === '0:v' ? '[0:v]' : `[${videoOut}]`;
+    const font =
+      process.platform === 'win32'
+        ? 'C\\\\:/Windows/Fonts/arial.ttf'
+        : '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
+    filters.push(
+      `${wmIn}drawtext=fontfile='${font}':text='${watermarkLabel}':fontsize=22:fontcolor=white@0.8:x=W-tw-20:y=H-th-20[vout]`
+    );
     videoOut = 'vout';
   }
 
@@ -119,7 +131,8 @@ export function processVideoExport(inputPath, options = {}) {
   const preset = FILTER_PRESETS[filterPreset] || FILTER_PRESETS.none;
   const outputFilename = `processed-${fingerprintId}.mp4`;
   const outputPath = path.join(config.processedDir, outputFilename);
-  const hasWatermark = applyWatermark && existsSync(watermarkPath);
+  const hasImageWatermark = applyWatermark && existsSync(watermarkPath);
+  const useTextWatermark = applyWatermark && !existsSync(watermarkPath);
   const musicEnabled = Boolean(audio.enabled && audio.track);
 
   return new Promise((resolve, reject) => {
@@ -128,16 +141,18 @@ export function processVideoExport(inputPath, options = {}) {
         const hasOriginalAudio = Boolean(meta.audio);
         const { filters, videoOut, audioOut } = buildFilterGraph({
           videoFilters: preset.videoFilters,
-          hasWatermark,
+          hasWatermark: hasImageWatermark,
+          useTextWatermark,
           musicOptions: musicEnabled ? audio : null,
           hasOriginalAudio,
           scaleTo,
+          watermarkLabel: platformId,
         });
 
         const runExport = (nvenc) => {
           let command = ffmpeg(inputPath);
 
-          if (hasWatermark) {
+          if (hasImageWatermark) {
             command = command.input(watermarkPath);
           }
 
@@ -198,8 +213,9 @@ export function processVideoExport(inputPath, options = {}) {
                 outputFilename,
                 fingerprintId,
                 downloadUrl: `/api/video/file/${outputFilename}`,
-                appliedFilter: filterPreset,
+                appliedFilter: filterPreset !== 'none' ? filterPreset : null,
                 appliedMusic: musicEnabled ? audio.track : null,
+                appliedWatermark: applyWatermark,
               })
             )
             .on('error', (err) => {
@@ -207,7 +223,7 @@ export function processVideoExport(inputPath, options = {}) {
                 runExport(false);
                 return;
               }
-              reject(err);
+              reject(new Error(`Video export failed: ${err.message}`));
             })
             .save(outputPath);
         };

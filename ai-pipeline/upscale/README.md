@@ -23,6 +23,17 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Enable NVIDIA GPU (recommended)
+
+Default `pip install` gets **CPU-only** PyTorch. If you have an NVIDIA GPU (e.g. RTX 3050), run:
+
+```powershell
+# Windows — from ai-pipeline/upscale
+.\install-gpu.ps1
+```
+
+Then restart the upscale server. Verify with `GET /health` — you should see `"gpu": true` and your GPU name.
+
 ### Download model weights
 
 ```bash

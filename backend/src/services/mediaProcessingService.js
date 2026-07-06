@@ -136,35 +136,31 @@ export function processVideoExport(inputPath, options = {}) {
         const outputOptions = [
           '-map',
           filters.length > 0 ? `[${videoOut}]` : '0:v',
-          '-c:v libx264',
-          '-preset fast',
-          '-crf 23',
-          '-pix_fmt yuv420p',
+          '-c:v', 'libx264',
+          '-preset', 'fast',
+          '-crf', '23',
+          '-pix_fmt', 'yuv420p',
         ];
 
         if (audioOut) {
-          outputOptions.push('-map', `[${audioOut}]`, '-c:a aac', '-b:a 192k', '-shortest');
+          outputOptions.push('-map', `[${audioOut}]`, '-c:a', 'aac', '-b:a', '192k', '-shortest');
         } else if (hasOriginalAudio) {
-          outputOptions.push('-map', '0:a?', '-c:a aac', '-b:a 128k');
+          outputOptions.push('-map', '0:a?', '-c:a', 'aac', '-b:a', '128k');
         }
 
         outputOptions.push(
-          `-metadata title=${JSON.stringify(`Processed by ${platformId}`)}`,
-          `-metadata comment=${JSON.stringify(`fingerprint:${fingerprintId}`)}`,
-          `-metadata encoded_by=${JSON.stringify(platformId)}`,
-          `-metadata copyright=${JSON.stringify(platformId)}`
+          '-metadata', `title=Processed by ${platformId}`,
+          '-metadata', `comment=fingerprint:${fingerprintId}`,
+          '-metadata', `encoded_by=${platformId}`,
+          '-metadata', `copyright=${platformId}`
         );
 
         if (filterPreset !== 'none') {
-          outputOptions.push(
-            `-metadata description=${JSON.stringify(`filter:${filterPreset}`)}`
-          );
+          outputOptions.push('-metadata', `description=filter:${filterPreset}`);
         }
 
         if (musicEnabled) {
-          outputOptions.push(
-            `-metadata artist=${JSON.stringify(`bgm:${path.basename(audio.track)}`)}`
-          );
+          outputOptions.push('-metadata', `artist=bgm:${path.basename(audio.track)}`);
         }
 
         command

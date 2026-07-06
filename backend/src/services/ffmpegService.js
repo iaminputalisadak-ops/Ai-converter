@@ -81,15 +81,15 @@ export function applyWatermarkAndFingerprint(inputPath, options = {}) {
 
     command
       .outputOptions([
-        '-c:v libx264',
-        '-preset fast',
-        '-crf 23',
-        '-c:a aac',
-        '-b:a 128k',
-        `-metadata title=${JSON.stringify(`Processed by ${platformId}`)}`,
-        `-metadata comment=${JSON.stringify(`fingerprint:${fingerprintId}`)}`,
-        `-metadata encoded_by=${JSON.stringify(platformId)}`,
-        `-metadata copyright=${JSON.stringify(platformId)}`,
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '23',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-metadata', `title=Processed by ${platformId}`,
+        '-metadata', `comment=fingerprint:${fingerprintId}`,
+        '-metadata', `encoded_by=${platformId}`,
+        '-metadata', `copyright=${platformId}`,
       ])
       .on('end', () =>
         resolve({

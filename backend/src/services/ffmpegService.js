@@ -67,40 +67,51 @@ export function applyWatermarkAndFingerprint(inputPath, options = {}) {
   const outputPath = path.join(config.processedDir, outputFilename);
 
   return new Promise((resolve, reject) => {
-    let command = ffmpeg(inputPath);
+    const runEncode = (nvenc) => {
+      let command = ffmpeg(inputPath);
 
-    const filters = [];
-    if (existsSync(watermarkPath)) {
-      command = command.input(watermarkPath);
-      filters.push('overlay=W-w-20:H-h-20');
-    }
+      const filters = [];
+      if (existsSync(watermarkPath)) {
+        command = command.input(watermarkPath);
+        filters.push('overlay=W-w-20:H-h-20');
+      }
 
-    if (filters.length > 0) {
-      command = command.complexFilter(filters);
-    }
+      if (filters.length > 0) {
+        command = command.complexFilter(filters);
+      }
 
-    command
-      .outputOptions([
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '23',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-metadata', `title=Processed by ${platformId}`,
-        '-metadata', `comment=fingerprint:${fingerprintId}`,
-        '-metadata', `encoded_by=${platformId}`,
-        '-metadata', `copyright=${platformId}`,
-      ])
-      .on('end', () =>
-        resolve({
-          outputPath,
-          outputFilename,
-          fingerprintId,
-          downloadUrl: `/api/video/file/${outputFilename}`,
+      const videoCodec = nvenc
+        ? ['-c:v', 'h264_nvenc', '-preset', 'p1', '-rc', 'vbr', '-cq', '23']
+        : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23'];
+
+      command
+        .outputOptions([
+          ...videoCodec,
+          '-c:a', 'copy',
+          '-metadata', `title=Processed by ${platformId}`,
+          '-metadata', `comment=fingerprint:${fingerprintId}`,
+          '-metadata', `encoded_by=${platformId}`,
+          '-metadata', `copyright=${platformId}`,
+        ])
+        .on('end', () =>
+          resolve({
+            outputPath,
+            outputFilename,
+            fingerprintId,
+            downloadUrl: `/api/video/file/${outputFilename}`,
+          })
+        )
+        .on('error', (err) => {
+          if (nvenc) {
+            runEncode(false);
+            return;
+          }
+          reject(err);
         })
-      )
-      .on('error', reject)
-      .save(outputPath);
+        .save(outputPath);
+    };
+
+    runEncode(true);
   });
 }
 

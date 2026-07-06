@@ -90,10 +90,7 @@ export default function App() {
 
     try {
       const data = await fetchMetadata(url.trim());
-      setMetadata(data);
-      if (data.formats?.length) {
-        setSelectedItag(String(data.formats[0].itag));
-      }
+      resetForNewMetadata(data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -181,14 +178,18 @@ export default function App() {
   }
 
   function getProcessModifications() {
-    if (!isAiQuality(selectedItag)) return modifications;
+    if (!isAiQuality(selectedItag)) {
+      return {
+        ...modifications,
+        upscale: { enabled: false, target: '4k', mode: modifications.upscale.mode || 'fast' },
+      };
+    }
     return {
       ...modifications,
       upscale: {
-        ...modifications.upscale,
         enabled: true,
         target: aiTargetFromItag(selectedItag),
-        mode: modifications.upscale.mode || 'ai',
+        mode: modifications.upscale.mode || 'fast',
       },
     };
   }
@@ -198,14 +199,27 @@ export default function App() {
     if (isAiQuality(itag)) {
       setModifications((prev) => ({
         ...prev,
-        upscale: { enabled: true, target: aiTargetFromItag(itag), mode: prev.upscale.mode || 'ai' },
+        upscale: { enabled: true, target: aiTargetFromItag(itag), mode: prev.upscale.mode || 'fast' },
       }));
     } else {
       setModifications((prev) => ({
         ...prev,
-        upscale: { ...prev.upscale, enabled: false },
+        upscale: { enabled: false, target: '4k', mode: prev.upscale.mode || 'fast' },
       }));
     }
+  }
+
+  function resetForNewMetadata(data) {
+    setMetadata(data);
+    setResult(null);
+    setJobStatus(null);
+    if (data.formats?.length) {
+      setSelectedItag(String(data.formats[0].itag));
+    }
+    setModifications((prev) => ({
+      ...prev,
+      upscale: { enabled: false, target: '4k', mode: prev.upscale.mode || 'fast' },
+    }));
   }
 
   const aiQualitySelected = isAiQuality(selectedItag);
@@ -325,6 +339,13 @@ export default function App() {
                   ))}
                 </optgroup>
               </select>
+
+              {!aiQualitySelected && (
+                <p className="quality-note">
+                  Source quality selected — no upscaling. Output stays at the resolution you picked
+                  (e.g. 1080p). Only filters, music, and watermark are applied.
+                </p>
+              )}
 
               {aiQualitySelected && (
                 <div className="ai-quality-banner">

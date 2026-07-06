@@ -118,65 +118,78 @@ export function processVideoExport(inputPath, options = {}) {
           hasOriginalAudio,
         });
 
-        let command = ffmpeg(inputPath);
+        const runExport = (nvenc) => {
+          let command = ffmpeg(inputPath);
 
-        if (hasWatermark) {
-          command = command.input(watermarkPath);
-        }
+          if (hasWatermark) {
+            command = command.input(watermarkPath);
+          }
 
-        if (musicEnabled) {
-          const musicPath = resolveMusicPath(audio.track);
-          command = command.input(musicPath).inputOptions(['-stream_loop', '-1']);
-        }
+          if (musicEnabled) {
+            const musicPath = resolveMusicPath(audio.track);
+            command = command.input(musicPath).inputOptions(['-stream_loop', '-1']);
+          }
 
-        if (filters.length > 0) {
-          command = command.complexFilter(filters);
-        }
+          if (filters.length > 0) {
+            command = command.complexFilter(filters);
+          }
 
-        const outputOptions = [
-          '-map',
-          filters.length > 0 ? `[${videoOut}]` : '0:v',
-          '-c:v', 'libx264',
-          '-preset', 'fast',
-          '-crf', '23',
-          '-pix_fmt', 'yuv420p',
-        ];
+          const outputOptions = [
+            '-map',
+            filters.length > 0 ? `[${videoOut}]` : '0:v',
+            '-pix_fmt', 'yuv420p',
+          ];
 
-        if (audioOut) {
-          outputOptions.push('-map', `[${audioOut}]`, '-c:a', 'aac', '-b:a', '192k', '-shortest');
-        } else if (hasOriginalAudio) {
-          outputOptions.push('-map', '0:a?', '-c:a', 'aac', '-b:a', '128k');
-        }
+          if (nvenc) {
+            outputOptions.push('-c:v', 'h264_nvenc', '-preset', 'p1', '-rc', 'vbr', '-cq', '23');
+          } else {
+            outputOptions.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23');
+          }
 
-        outputOptions.push(
-          '-metadata', `title=Processed by ${platformId}`,
-          '-metadata', `comment=fingerprint:${fingerprintId}`,
-          '-metadata', `encoded_by=${platformId}`,
-          '-metadata', `copyright=${platformId}`
-        );
+          if (audioOut) {
+            outputOptions.push('-map', `[${audioOut}]`, '-c:a', 'aac', '-b:a', '192k', '-shortest');
+          } else if (hasOriginalAudio) {
+            outputOptions.push('-map', '0:a?', '-c:a', 'copy');
+          }
 
-        if (filterPreset !== 'none') {
-          outputOptions.push('-metadata', `description=filter:${filterPreset}`);
-        }
+          outputOptions.push(
+            '-metadata', `title=Processed by ${platformId}`,
+            '-metadata', `comment=fingerprint:${fingerprintId}`,
+            '-metadata', `encoded_by=${platformId}`,
+            '-metadata', `copyright=${platformId}`
+          );
 
-        if (musicEnabled) {
-          outputOptions.push('-metadata', `artist=bgm:${path.basename(audio.track)}`);
-        }
+          if (filterPreset !== 'none') {
+            outputOptions.push('-metadata', `description=filter:${filterPreset}`);
+          }
 
-        command
-          .outputOptions(outputOptions)
-          .on('end', () =>
-            resolve({
-              outputPath,
-              outputFilename,
-              fingerprintId,
-              downloadUrl: `/api/video/file/${outputFilename}`,
-              appliedFilter: filterPreset,
-              appliedMusic: musicEnabled ? audio.track : null,
+          if (musicEnabled) {
+            outputOptions.push('-metadata', `artist=bgm:${path.basename(audio.track)}`);
+          }
+
+          command
+            .outputOptions(outputOptions)
+            .on('end', () =>
+              resolve({
+                outputPath,
+                outputFilename,
+                fingerprintId,
+                downloadUrl: `/api/video/file/${outputFilename}`,
+                appliedFilter: filterPreset,
+                appliedMusic: musicEnabled ? audio.track : null,
+              })
+            )
+            .on('error', (err) => {
+              if (nvenc) {
+                runExport(false);
+                return;
+              }
+              reject(err);
             })
-          )
-          .on('error', reject)
-          .save(outputPath);
+            .save(outputPath);
+        };
+
+        runExport(true);
       })
       .catch(reject);
   });

@@ -100,7 +100,7 @@ async function runPipeline(jobId, payload) {
   let workingPath = localPath;
   let upscaleResult = null;
 
-  if (modifications.upscale?.enabled) {
+  if (modifications.upscale?.enabled === true) {
     const target = (modifications.upscale.target || '4k').toUpperCase();
     const isFast = modifications.upscale.mode === 'fast';
     let upscaleStatus = { gpu: false, device: 'cpu' };

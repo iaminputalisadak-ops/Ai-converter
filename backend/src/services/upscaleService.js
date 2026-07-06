@@ -1,0 +1,264 @@
+import { existsSync } from 'fs';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import ffmpeg from 'fluent-ffmpeg';
+import { v4 as uuidv4 } from 'uuid';
+import { config } from '../config.js';
+import { extractMetadata } from './ffmpegService.js';
+
+const execFileAsync = promisify(execFile);
+
+export const TARGET_PRESETS = {
+  '2x': {
+    label: '2× source resolution',
+    compute: (w, h) => ({
+      width: roundEven(w * 2),
+      height: roundEven(h * 2),
+    }),
+  },
+  '4k': {
+    label: '4K (3840×2160)',
+    compute: (w, h) => fitWithin(w, h, 3840, 2160),
+  },
+  '8k': {
+    label: '8K (7680×4320)',
+    compute: (w, h) => fitWithin(w, h, 7680, 4320),
+  },
+};
+
+function roundEven(n) {
+  return Math.max(2, Math.round(n / 2) * 2);
+}
+
+function fitWithin(width, height, maxWidth, maxHeight) {
+  const scale = Math.min(maxWidth / width, maxHeight / height);
+  return {
+    width: roundEven(width * scale),
+    height: roundEven(height * scale),
+  };
+}
+
+function buildUpscaleLabel(method, source, target) {
+  const src = `${source.width}×${source.height}`;
+  const dst = `${target.width}×${target.height}`;
+
+  if (method === 'realesrgan') {
+    return `AI-upscaled (Real-ESRGAN) from ${src} to ${dst}`;
+  }
+
+  return `Enhanced upscale (FFmpeg Lanczos) from ${src} to ${dst} — not true AI super-resolution`;
+}
+
+async function tryRealesrganService(inputPath, outputPath, scale) {
+  if (!config.aiUpscaleUrl) return null;
+
+  const buffer = await readFileBuffer(inputPath);
+  const formData = new FormData();
+  formData.append('file', new Blob([buffer], { type: 'video/mp4' }), path.basename(inputPath));
+  formData.append('scale', String(scale));
+
+  const response = await fetch(`${config.aiUpscaleUrl}/upscale`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Real-ESRGAN service failed: ${detail}`);
+  }
+
+  const outputBuffer = Buffer.from(await response.arrayBuffer());
+  await writeFileBuffer(outputPath, outputBuffer);
+  return 'realesrgan';
+}
+
+async function readFileBuffer(filePath) {
+  const { readFile } = await import('fs/promises');
+  return readFile(filePath);
+}
+
+async function writeFileBuffer(filePath, buffer) {
+  const { writeFile } = await import('fs/promises');
+  await writeFile(filePath, buffer);
+}
+
+async function tryRealesrganCli(inputPath, outputPath, scale) {
+  if (!config.realesrganBin || !existsSync(config.realesrganBin)) return null;
+
+  const framesDir = path.join(config.uploadDir, `frames-${uuidv4()}`);
+  const upscaledDir = path.join(config.uploadDir, `upscaled-${uuidv4()}`);
+  const { mkdir, rm } = await import('fs/promises');
+
+  await mkdir(framesDir, { recursive: true });
+  await mkdir(upscaledDir, { recursive: true });
+
+  try {
+    await runFfmpegCommand(inputPath, framesDir, '%06d.png', [
+      '-vf',
+      'format=rgb24',
+    ]);
+
+    await execFileAsync(config.realesrganBin, [
+      '-i',
+      framesDir,
+      '-o',
+      upscaledDir,
+      '-s',
+      String(scale),
+      '-f',
+      'png',
+    ]);
+
+    const meta = await extractMetadata(inputPath);
+    const fps = meta.video?.fps || 30;
+
+    await runFfmpegEncodeFromFrames(upscaledDir, outputPath, fps, inputPath);
+    return 'realesrgan';
+  } finally {
+    await rm(framesDir, { recursive: true, force: true });
+    await rm(upscaledDir, { recursive: true, force: true });
+  }
+}
+
+function runFfmpegCommand(inputPath, outputPattern, pattern, extraInputArgs = []) {
+  return new Promise((resolve, reject) => {
+    const output = path.join(outputPattern, pattern);
+    ffmpeg(inputPath)
+      .outputOptions(extraInputArgs)
+      .output(output)
+      .on('end', resolve)
+      .on('error', reject)
+      .run();
+  });
+}
+
+function runFfmpegEncodeFromFrames(framesDir, outputPath, fps, audioSourcePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(path.join(framesDir, '%06d.png'))
+      .inputOptions([`-framerate ${fps}`])
+      .input(audioSourcePath)
+      .outputOptions([
+        '-c:v libx264',
+        '-preset fast',
+        '-crf 18',
+        '-pix_fmt yuv420p',
+        '-c:a copy',
+        '-shortest',
+      ])
+      .output(outputPath)
+      .on('end', resolve)
+      .on('error', reject)
+      .run();
+  });
+}
+
+function upscaleWithFfmpeg(inputPath, outputPath, targetWidth, targetHeight) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .videoFilters([
+        `scale=${targetWidth}:${targetHeight}:flags=lanczos`,
+        'unsharp=5:5:0.6:5:5:0.0',
+      ])
+      .outputOptions(['-c:v libx264', '-preset fast', '-crf 18', '-c:a copy'])
+      .output(outputPath)
+      .on('end', () => resolve('ffmpeg_lanczos'))
+      .on('error', reject)
+      .run();
+  });
+}
+
+function inferScaleFactor(sourceWidth, targetWidth) {
+  const ratio = targetWidth / sourceWidth;
+  if (ratio <= 2) return 2;
+  if (ratio <= 4) return 4;
+  return 4;
+}
+
+export async function upscaleVideo(inputPath, options = {}) {
+  const { target = '4k' } = options;
+  const preset = TARGET_PRESETS[target];
+
+  if (!preset) {
+    throw new Error(`Unknown upscale target "${target}". Use: ${Object.keys(TARGET_PRESETS).join(', ')}`);
+  }
+
+  const sourceMeta = await extractMetadata(inputPath);
+  const sourceWidth = sourceMeta.video?.width;
+  const sourceHeight = sourceMeta.video?.height;
+
+  if (!sourceWidth || !sourceHeight) {
+    throw new Error('Could not read source video dimensions for upscaling.');
+  }
+
+  const targetDims = preset.compute(sourceWidth, sourceHeight);
+
+  if (targetDims.width <= sourceWidth && targetDims.height <= sourceHeight) {
+    return {
+      skipped: true,
+      reason: 'Source resolution already meets or exceeds the selected target.',
+      source: { width: sourceWidth, height: sourceHeight },
+      target: targetDims,
+      outputPath: inputPath,
+    };
+  }
+
+  const outputFilename = `upscaled-${uuidv4()}.mp4`;
+  const outputPath = path.join(config.processedDir, outputFilename);
+  const scale = inferScaleFactor(sourceWidth, targetDims.width);
+
+  let method = null;
+
+  try {
+    method = await tryRealesrganService(inputPath, outputPath, scale);
+  } catch (err) {
+    console.warn('Real-ESRGAN service unavailable, trying fallback:', err.message);
+  }
+
+  if (!method) {
+    try {
+      method = await tryRealesrganCli(inputPath, outputPath, scale);
+    } catch (err) {
+      console.warn('Real-ESRGAN CLI unavailable, using FFmpeg:', err.message);
+    }
+  }
+
+  if (!method) {
+    method = await upscaleWithFfmpeg(inputPath, outputPath, targetDims.width, targetDims.height);
+  }
+
+  const outputMeta = await extractMetadata(outputPath);
+  const label = buildUpscaleLabel(method, { width: sourceWidth, height: sourceHeight }, targetDims);
+
+  return {
+    skipped: false,
+    method,
+    targetPreset: target,
+    label,
+    source: { width: sourceWidth, height: sourceHeight },
+    target: targetDims,
+    output: {
+      width: outputMeta.video?.width,
+      height: outputMeta.video?.height,
+    },
+    outputPath,
+    outputFilename,
+  };
+}
+
+export async function checkUpscaleAvailability() {
+  const status = {
+    ffmpeg: true,
+    realesrganService: Boolean(config.aiUpscaleUrl),
+    realesrganCli: Boolean(config.realesrganBin && existsSync(config.realesrganBin)),
+  };
+
+  status.recommendedMethod = status.realesrganService
+    ? 'realesrgan_service'
+    : status.realesrganCli
+      ? 'realesrgan_cli'
+      : 'ffmpeg_lanczos';
+
+  return status;
+}

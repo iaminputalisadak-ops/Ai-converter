@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+uploads/
+processed/
+temp/
+.DS_Store
+Thumbs.db
+
+# Python upscale service
+ai-pipeline/upscale/.venv/
+ai-pipeline/upscale/weights/*.pth
+__pycache__/
+*.pyc

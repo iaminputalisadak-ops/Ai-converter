@@ -184,7 +184,12 @@ export default function App() {
     if (!isAiQuality(selectedItag)) return modifications;
     return {
       ...modifications,
-      upscale: { enabled: true, target: aiTargetFromItag(selectedItag) },
+      upscale: {
+        ...modifications.upscale,
+        enabled: true,
+        target: aiTargetFromItag(selectedItag),
+        mode: modifications.upscale.mode || 'ai',
+      },
     };
   }
 
@@ -193,7 +198,7 @@ export default function App() {
     if (isAiQuality(itag)) {
       setModifications((prev) => ({
         ...prev,
-        upscale: { enabled: true, target: aiTargetFromItag(itag), mode: prev.upscale.mode || 'fast' },
+        upscale: { enabled: true, target: aiTargetFromItag(itag), mode: prev.upscale.mode || 'ai' },
       }));
     } else {
       setModifications((prev) => ({
@@ -341,15 +346,15 @@ export default function App() {
                         }))
                       }
                     >
-                      <option value="fast">Fast — FFmpeg (~10–60 sec)</option>
-                      <option value="ai">AI Quality — Real-ESRGAN (best detail)</option>
+                      <option value="fast">Fast — GPU FFmpeg (~10–30 sec)</option>
+                      <option value="ai">AI Quality — Real-ESRGAN + GPU (best detail, ~1–2 min)</option>
                     </select>
                   </div>
                   <p className="quality-note">
                     {modifications.upscale.mode === 'fast'
-                      ? 'Fast mode resizes with FFmpeg Lanczos — finishes in seconds, not true AI detail.'
+                      ? 'Fast mode uses GPU-accelerated FFmpeg scaling — near-instant, not AI-enhanced.'
                       : upscaleStatus?.gpu
-                        ? `GPU detected (${upscaleStatus.device}) — AI 8K typically takes 1–3 min for short reels. Use Fast mode for near-instant results.`
+                        ? `GPU optimized (${upscaleStatus.device}) — 2× AI model + GPU encode. Typical reels: ~1–2 min.`
                         : 'No GPU detected — AI Quality can take 10–30+ min for short reels on CPU. Use Fast mode to finish quickly.'}
                   </p>
                 </div>

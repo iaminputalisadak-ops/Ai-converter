@@ -40,7 +40,9 @@ Then restart the upscale server. Verify with `GET /health` — you should see `"
 mkdir -p weights
 # Download RealESRGAN_x4plus.pth from:
 # https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth
-# Place at: ai-pipeline/upscale/weights/RealESRGAN_x4plus.pth
+# Download RealESRGAN_x2plus.pth (faster for 2× upscaling) from:
+# https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth
+# Place both in: ai-pipeline/upscale/weights/
 ```
 
 Requires **FFmpeg** on PATH for audio muxing, and a **CUDA GPU** is strongly recommended for reasonable speed.

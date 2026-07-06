@@ -51,8 +51,8 @@ function buildUpscaleLabel(method, source, target) {
     return `AI-upscaled (Real-ESRGAN + FFmpeg) from ${src} to ${dst}`;
   }
 
-  if (method === 'ffmpeg_lanczos') {
-    return `Fast upscale (FFmpeg Lanczos) from ${src} to ${dst} — quick, not AI-enhanced`;
+  if (method === 'ffmpeg_lanczos' || method === 'ffmpeg_cuda') {
+    return `Fast upscale (FFmpeg${method === 'ffmpeg_cuda' ? ' GPU' : ''} Lanczos) from ${src} to ${dst} — quick, not AI-enhanced`;
   }
 
   return `Enhanced upscale from ${src} to ${dst}`;
@@ -162,18 +162,32 @@ function runFfmpegEncodeFromFrames(framesDir, outputPath, fps, audioSourcePath) 
   });
 }
 
-function upscaleWithFfmpeg(inputPath, outputPath, targetWidth, targetHeight) {
+function upscaleWithFfmpeg(inputPath, outputPath, targetWidth, targetHeight, { useGpu = false } = {}) {
   return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .videoFilters([
-        `scale=${targetWidth}:${targetHeight}:flags=lanczos`,
-        'unsharp=5:5:0.6:5:5:0.0',
-      ])
-      .outputOptions(['-c:v libx264', '-preset fast', '-crf 18', '-c:a copy'])
-      .output(outputPath)
-      .on('end', () => resolve('ffmpeg_lanczos'))
-      .on('error', reject)
-      .run();
+    const run = (gpu) => {
+      const chain = ffmpeg(inputPath);
+      if (gpu) {
+        chain.videoFilters([`scale_cuda=${targetWidth}:${targetHeight}`]);
+      } else {
+        chain.videoFilters([
+          `scale=${targetWidth}:${targetHeight}:flags=lanczos`,
+          'unsharp=5:5:0.6:5:5:0.0',
+        ]);
+      }
+      chain
+        .outputOptions(['-c:v libx264', '-preset fast', '-crf 18', '-c:a copy'])
+        .output(outputPath)
+        .on('end', () => resolve(gpu ? 'ffmpeg_cuda' : 'ffmpeg_lanczos'))
+        .on('error', (err) => {
+          if (gpu) {
+            run(false);
+            return;
+          }
+          reject(err);
+        })
+        .run();
+    };
+    run(useGpu);
   });
 }
 
@@ -215,13 +229,19 @@ export async function upscaleVideo(inputPath, options = {}) {
 
   const outputFilename = `upscaled-${uuidv4()}.mp4`;
   const outputPath = path.join(config.processedDir, outputFilename);
-  const gpuFast = gpuAvailable && target === '8k';
+  const gpuFast = gpuAvailable && (target === '8k' || target === '4k');
   const scale = inferScaleFactor(sourceWidth, targetDims.width, { gpuFast });
 
   let method = null;
 
   if (mode === 'fast') {
-    method = await upscaleWithFfmpeg(inputPath, outputPath, targetDims.width, targetDims.height);
+    method = await upscaleWithFfmpeg(
+      inputPath,
+      outputPath,
+      targetDims.width,
+      targetDims.height,
+      { useGpu: gpuAvailable }
+    );
   } else {
     try {
       method = await tryRealesrganService(inputPath, outputPath, scale);
@@ -238,14 +258,22 @@ export async function upscaleVideo(inputPath, options = {}) {
     }
 
     if (!method) {
-      method = await upscaleWithFfmpeg(inputPath, outputPath, targetDims.width, targetDims.height);
+      method = await upscaleWithFfmpeg(
+        inputPath,
+        outputPath,
+        targetDims.width,
+        targetDims.height,
+        { useGpu: gpuAvailable }
+      );
     } else {
       const aiMeta = await extractMetadata(outputPath);
       const needsFinalScale =
         aiMeta.video?.width !== targetDims.width || aiMeta.video?.height !== targetDims.height;
       if (needsFinalScale) {
         const scaledPath = path.join(config.processedDir, `scaled-${uuidv4()}.mp4`);
-        await upscaleWithFfmpeg(outputPath, scaledPath, targetDims.width, targetDims.height);
+        await upscaleWithFfmpeg(outputPath, scaledPath, targetDims.width, targetDims.height, {
+          useGpu: gpuAvailable,
+        });
         method = 'realesrgan+ffmpeg';
         const { unlink } = await import('fs/promises');
         await unlink(outputPath).catch(() => {});

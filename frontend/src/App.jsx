@@ -68,6 +68,11 @@ export default function App() {
     styleTransfer: false,
     frameInterpolation: false,
     objectDetection: false,
+    stabilize: false,
+    hdrTone: false,
+    denoiseSharpen: true,
+    audioEnhance: true,
+    generateThumbnail: true,
     upscale: { enabled: false, target: '4k', mode: 'fast' },
     filters: { preset: 'none' },
     audio: {
@@ -513,7 +518,7 @@ export default function App() {
                     checked={modifications.styleTransfer}
                     onChange={() => toggleModification('styleTransfer')}
                   />
-                  Style transfer (AI — stub)
+                  Cinematic color grade (LUT-style)
                 </label>
                 <label className="option-item">
                   <input
@@ -521,7 +526,23 @@ export default function App() {
                     checked={modifications.frameInterpolation}
                     onChange={() => toggleModification('frameInterpolation')}
                   />
-                  Frame interpolation (AI — stub)
+                  Frame interpolation (2× smoother motion)
+                </label>
+                <label className="option-item">
+                  <input
+                    type="checkbox"
+                    checked={modifications.stabilize}
+                    onChange={() => toggleModification('stabilize')}
+                  />
+                  Video stabilization
+                </label>
+                <label className="option-item">
+                  <input
+                    type="checkbox"
+                    checked={modifications.hdrTone}
+                    onChange={() => toggleModification('hdrTone')}
+                  />
+                  HDR-style tone mapping
                 </label>
                 <label className="option-item">
                   <input
@@ -529,8 +550,13 @@ export default function App() {
                     checked={modifications.objectDetection}
                     onChange={() => toggleModification('objectDetection')}
                   />
-                  Object detection (AI — stub)
+                  Object removal (GPU model — planned)
                 </label>
+                <p className="quality-note">
+                  Denoise, sharpen, audio enhancement, and auto-thumbnail run automatically on
+                  every processed video. Super-resolution uses Real-ESRGAN when AI upscale is
+                  selected.
+                </p>
               </div>
 
               <div className="actions">
@@ -583,6 +609,28 @@ export default function App() {
                 <dd>{result.appliedMusic}</dd>
               </>
             )}
+            {result.enhancements?.length > 0 && (
+              <>
+                <dt>Enhancements</dt>
+                <dd>
+                  {result.enhancements.map((s) => (
+                    <div key={s.step}>{s.message}</div>
+                  ))}
+                </dd>
+              </>
+            )}
+            {result.thumbnail?.url && (
+              <>
+                <dt>Auto thumbnail</dt>
+                <dd>
+                  <img
+                    className="result-thumb"
+                    src={result.thumbnail.url}
+                    alt="Auto-selected video thumbnail"
+                  />
+                </dd>
+              </>
+            )}
             {result.fingerprintId && (
               <>
                 <dt>Fingerprint ID</dt>
@@ -619,21 +667,14 @@ export default function App() {
                 </dd>
               </>
             )}
-            {result.aiPipeline?.steps?.length > 0 && (
-              <>
-                <dt>AI Pipeline</dt>
-                <dd>
-                  {result.aiPipeline.steps.map((s) => (
-                    <div key={s.step}>
-                      {s.step}: {s.message}
-                    </div>
-                  ))}
-                </dd>
-              </>
-            )}
           </dl>
           {result.downloadUrl && (
-            <a className="btn-primary" href={result.downloadUrl} download style={{ display: 'inline-block', textDecoration: 'none' }}>
+            <a
+              className="btn-primary"
+              href={result.downloadUrl}
+              download
+              style={{ display: 'inline-block', textDecoration: 'none' }}
+            >
               Download Processed File
             </a>
           )}

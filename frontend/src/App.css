@@ -130,6 +130,12 @@
   color: #f87171;
 }
 
+.result-thumb {
+  max-width: 240px;
+  border-radius: 8px;
+  margin-top: 0.5rem;
+}
+
 .option-block label {
   display: block;
   font-size: 0.875rem;

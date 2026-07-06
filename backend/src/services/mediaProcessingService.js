@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import ffmpeg from 'fluent-ffmpeg';
 import { config } from '../config.js';
 import { extractMetadata } from './ffmpegService.js';
+import { buildAudioEnhanceFilters } from './videoEnhancementService.js';
 
 export const FILTER_PRESETS = {
   none: { label: 'None', videoFilters: [] },
@@ -72,6 +73,7 @@ function buildFilterGraph({
   hasOriginalAudio,
   scaleTo = null,
   watermarkLabel = 'converter',
+  audioEnhance = true,
 }) {
   const filters = [];
   let videoOut = '0:v';
@@ -110,15 +112,22 @@ function buildFilterGraph({
     const musicInput = hasWatermark ? 2 : 1;
     const volume = Math.min(Math.max(musicOptions.volume ?? 0.25, 0), 1);
     const musicVol = volume.toFixed(2);
+    const voiceChain = audioEnhance
+      ? buildAudioEnhanceFilters()
+      : 'anull';
 
     if (musicOptions.mixWithOriginal && hasOriginalAudio) {
       filters.push(
+        `[0:a]${voiceChain}[vox]`,
         `[${musicInput}:a]volume=${musicVol},aloop=loop=-1:size=2e+09[bgm]`,
-        `[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]`
+        `[vox][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]`
       );
     } else {
       filters.push(`[${musicInput}:a]volume=${musicVol},aloop=loop=-1:size=2e+09[aout]`);
     }
+    audioOut = 'aout';
+  } else if (hasOriginalAudio && audioEnhance) {
+    filters.push(`[0:a]${buildAudioEnhanceFilters()}[aout]`);
     audioOut = 'aout';
   }
 
@@ -134,6 +143,7 @@ export function processVideoExport(inputPath, options = {}) {
     filterPreset = 'none',
     audio = {},
     scaleTo = null,
+    audioEnhance = true,
   } = options;
 
   const preset = FILTER_PRESETS[filterPreset] || FILTER_PRESETS.none;
@@ -155,6 +165,7 @@ export function processVideoExport(inputPath, options = {}) {
           hasOriginalAudio,
           scaleTo,
           watermarkLabel: platformId,
+          audioEnhance,
         });
 
         const runExport = (nvenc) => {

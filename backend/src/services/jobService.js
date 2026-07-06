@@ -6,8 +6,9 @@ const STEP_WEIGHTS = {
   resolve: 5,
   download: 15,
   analyze: 5,
-  upscale: 45,
-  export: 25,
+  enhance: 20,
+  upscale: 35,
+  export: 20,
   finalize: 5,
 };
 
@@ -27,6 +28,8 @@ export function estimateProcessingMs(options = {}) {
     }
   }
 
+  seconds += 6; // denoise + sharpen (always on)
+
   if (filterPreset && filterPreset !== 'none') seconds += duration * 1.5;
   if (audio?.enabled) seconds += duration * 1.2;
   if (applyWatermark) seconds += duration * 0.8;
@@ -41,6 +44,7 @@ function buildSteps(options) {
     { id: 'resolve', label: 'Resolving video URL', status: 'pending' },
     { id: 'download', label: 'Downloading source video', status: 'pending' },
     { id: 'analyze', label: 'Reading video metadata', status: 'pending' },
+    { id: 'enhance', label: 'Quality enhancements (denoise, sharpen)', status: 'pending' },
   ];
 
   if (options.upscale?.enabled) {

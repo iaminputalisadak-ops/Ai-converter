@@ -1,10 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
 import { detectPlatform, isValidUrl } from '../utils/platform.js';
 import { fetchVideoMetadata, resolveDownloadUrl } from './videoService.js';
-import { downloadToFile, extractMetadata, runAiPipeline } from './ffmpegService.js';
-import { processVideoExport, listMusicTracks } from './mediaProcessingService.js';
+import { downloadToFile, extractMetadata } from './ffmpegService.js';
+import { processVideoExport } from './mediaProcessingService.js';
 import { upscaleVideo, checkUpscaleAvailability, computeUpscaleTarget } from './upscaleService.js';
 import { validateExportOptions } from './exportValidation.js';
+import { runVideoEnhancements } from './videoEnhancementService.js';
 import {
   createJob,
   setJobStep,
@@ -89,7 +90,6 @@ async function runPipeline(jobId, payload) {
   setJobStep(jobId, 'analyze', 'running', 'Analyzing resolution, duration, and codec…');
 
   const fileMetadata = await extractMetadata(localPath);
-  const aiResult = runAiPipeline(localPath, modifications);
 
   updateJob(jobId, {
     estimatedTotalMs: estimateProcessingMs({
@@ -103,7 +103,18 @@ async function runPipeline(jobId, payload) {
 
   setJobStep(jobId, 'analyze', 'completed');
 
-  let workingPath = localPath;
+  setJobStep(jobId, 'enhance', 'running', 'Applying quality enhancements (denoise, sharpen, AI options)…');
+  const enhancement = await runVideoEnhancements(localPath, modifications, fileMetadata);
+  let workingPath = enhancement.outputPath;
+  setJobStep(
+    jobId,
+    'enhance',
+    'completed',
+    enhancement.steps.length
+      ? enhancement.steps.map((s) => s.message).join(' · ')
+      : 'Quality pass complete'
+  );
+
   let upscaleResult = null;
 
   const filterPreset = modifications.filters?.preset || 'none';
@@ -136,11 +147,12 @@ async function runPipeline(jobId, payload) {
       `Single-pass encode: scale to ${target}, filter & watermark on GPU…`
     );
 
-    const processed = await processVideoExport(localPath, {
+    const processed = await processVideoExport(workingPath, {
       applyWatermark,
       filterPreset,
       audio: audioOptions,
       scaleTo: targetDims,
+      audioEnhance: enhancement.audioEnhance,
     });
 
     workingPath = processed.outputPath;
@@ -162,7 +174,8 @@ async function runPipeline(jobId, payload) {
       jobId,
       platform: platform.id,
       fileMetadata,
-      aiPipeline: aiResult,
+      enhancements: enhancement.steps,
+      thumbnail: enhancement.thumbnail,
       upscale: upscaleResult,
       ...processed,
       appliedFilter: processed.appliedFilter,
@@ -197,7 +210,7 @@ async function runPipeline(jobId, payload) {
           : `AI upscaling each frame to ${target} — slowest step on CPU…`
     );
 
-    upscaleResult = await upscaleVideo(localPath, {
+    upscaleResult = await upscaleVideo(workingPath, {
       target: modifications.upscale.target || '4k',
       mode: modifications.upscale.mode || 'ai',
       gpuAvailable: upscaleStatus.gpu,
@@ -228,7 +241,8 @@ async function runPipeline(jobId, payload) {
     jobId,
     platform: platform.id,
     fileMetadata,
-    aiPipeline: aiResult,
+    enhancements: enhancement.steps,
+    thumbnail: enhancement.thumbnail,
     upscale: upscaleResult,
   };
 
@@ -237,6 +251,7 @@ async function runPipeline(jobId, payload) {
       applyWatermark,
       filterPreset: filterPresetAfterUpscale,
       audio: audioOptionsAfterUpscale,
+      audioEnhance: enhancement.audioEnhance,
     });
     result = {
       ...result,

@@ -1,8 +1,8 @@
-Add royalty-free MP3, WAV, or M4A files here for background music.
+Background music for video processing.
 
-Examples (download your own licensed tracks):
-- ambient.mp3
-- upbeat.mp3
-- cinematic.mp3
+Bundled track (royalty-free, generated in-app):
+- free-ambient.mp3 — soft ambient loop, selected by default
 
-These tracks are mixed server-side during video processing.
+Add your own MP3, WAV, or M4A files here. They appear in the UI dropdown after you click Get Info.
+
+Tracks are mixed server-side during Process & Download.

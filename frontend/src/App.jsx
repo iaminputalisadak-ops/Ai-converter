@@ -39,7 +39,12 @@ function aiTargetFromItag(itag) {
   return String(itag).replace(/^ai-/, '');
 }
 
-function formatElapsed(ms) {
+const DEFAULT_MUSIC_TRACK = 'free-ambient.mp3';
+
+function pickDefaultTrack(tracks) {
+  if (!tracks?.length) return null;
+  return tracks.find((t) => t.id === DEFAULT_MUSIC_TRACK) || tracks[0];
+}
   if (!ms) return '0s';
   const totalSec = Math.floor(ms / 1000);
   const m = Math.floor(totalSec / 60);
@@ -64,8 +69,8 @@ export default function App() {
     upscale: { enabled: false, target: '4k', mode: 'fast' },
     filters: { preset: 'none' },
     audio: {
-      enabled: false,
-      track: '',
+      enabled: true,
+      track: DEFAULT_MUSIC_TRACK,
       volume: 0.25,
       mixWithOriginal: true,
     },
@@ -77,7 +82,21 @@ export default function App() {
 
   useEffect(() => {
     fetchUpscaleStatus().then(setUpscaleStatus).catch(() => null);
-    fetchMusicTracks().then(setMusicTracks).catch(() => []);
+    fetchMusicTracks()
+      .then((tracks) => {
+        setMusicTracks(tracks);
+        const defaultTrack = pickDefaultTrack(tracks);
+        if (!defaultTrack) return;
+        setModifications((prev) => ({
+          ...prev,
+          audio: {
+            ...prev.audio,
+            enabled: true,
+            track: defaultTrack.id,
+          },
+        }));
+      })
+      .catch(() => []);
     fetchFilterPresets().then(setFilterPresets).catch(() => []);
   }, []);
 
@@ -229,9 +248,15 @@ export default function App() {
     if (data.formats?.length) {
       setSelectedItag(String(data.formats[0].itag));
     }
+    const defaultTrack = pickDefaultTrack(musicTracks);
     setModifications((prev) => ({
       ...prev,
       upscale: { enabled: false, target: '4k', mode: prev.upscale.mode || 'fast' },
+      audio: {
+        ...prev.audio,
+        enabled: true,
+        track: defaultTrack?.id || DEFAULT_MUSIC_TRACK,
+      },
     }));
   }
 

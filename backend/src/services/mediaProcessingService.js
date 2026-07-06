@@ -41,9 +41,17 @@ export function listMusicTracks() {
     .filter((file) => /\.(mp3|wav|m4a|aac|ogg)$/i.test(file))
     .map((file) => ({
       id: file,
-      name: path.parse(file).name.replace(/[-_]/g, ' '),
+      name:
+        file === 'free-ambient.mp3'
+          ? 'Free Ambient (royalty-free, loops)'
+          : path.parse(file).name.replace(/[-_]/g, ' '),
       filename: file,
-    }));
+    }))
+    .sort((a, b) => {
+      if (a.id === 'free-ambient.mp3') return -1;
+      if (b.id === 'free-ambient.mp3') return 1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 function resolveMusicPath(trackId) {

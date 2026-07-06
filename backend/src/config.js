@@ -56,6 +56,39 @@ async function ensureWatermark() {
   );
 }
 
+async function ensureDefaultMusic() {
+  const musicDir = path.join(config.assetsDir, 'music');
+  const defaultTrack = path.join(musicDir, 'free-ambient.mp3');
+  if (existsSync(defaultTrack)) return;
+
+  await execFileAsync(
+    'ffmpeg',
+    [
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=196:duration=45',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=247:duration=45',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=294:duration=45',
+      '-filter_complex',
+      '[0:a][1:a][2:a]amix=inputs=3:duration=longest,volume=0.18,afade=t=in:st=0:d=3,afade=t=out:st=42:d=3',
+      '-c:a',
+      'libmp3lame',
+      '-q:a',
+      '4',
+      defaultTrack,
+    ],
+    { timeout: 60000 }
+  );
+}
+
 export async function ensureDirectories() {
   await mkdir(config.uploadDir, { recursive: true });
   await mkdir(config.processedDir, { recursive: true });
@@ -67,5 +100,11 @@ export async function ensureDirectories() {
     await ensureWatermark();
   } catch (err) {
     console.warn('Could not generate default watermark:', err.message);
+  }
+
+  try {
+    await ensureDefaultMusic();
+  } catch (err) {
+    console.warn('Could not generate default music track:', err.message);
   }
 }

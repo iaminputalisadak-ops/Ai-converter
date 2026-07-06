@@ -177,15 +177,16 @@ function upscaleWithFfmpeg(inputPath, outputPath, targetWidth, targetHeight) {
   });
 }
 
-function inferScaleFactor(sourceWidth, targetWidth) {
+function inferScaleFactor(sourceWidth, targetWidth, { gpuFast = false } = {}) {
   const ratio = targetWidth / sourceWidth;
+  if (gpuFast && ratio > 2) return 2;
   if (ratio <= 2) return 2;
   if (ratio <= 4) return 4;
   return 4;
 }
 
 export async function upscaleVideo(inputPath, options = {}) {
-  const { target = '4k', mode = 'ai' } = options;
+  const { target = '4k', mode = 'ai', gpuAvailable = false } = options;
   const preset = TARGET_PRESETS[target];
 
   if (!preset) {
@@ -214,7 +215,8 @@ export async function upscaleVideo(inputPath, options = {}) {
 
   const outputFilename = `upscaled-${uuidv4()}.mp4`;
   const outputPath = path.join(config.processedDir, outputFilename);
-  const scale = inferScaleFactor(sourceWidth, targetDims.width);
+  const gpuFast = gpuAvailable && target === '8k';
+  const scale = inferScaleFactor(sourceWidth, targetDims.width, { gpuFast });
 
   let method = null;
 

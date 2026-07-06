@@ -18,8 +18,13 @@ export function estimateProcessingMs(options = {}) {
   let seconds = 10;
 
   if (upscale?.enabled) {
-    const factor = upscale.mode === 'fast' ? 0.5 : upscale.target === '8k' ? 14 : upscale.target === '4k' ? 9 : 6;
-    seconds += duration * factor;
+    if (upscale.mode === 'fast') {
+      seconds += duration * 0.5;
+    } else if (upscale.gpuAvailable) {
+      seconds += duration * (upscale.target === '8k' ? 2.5 : upscale.target === '4k' ? 1.8 : 1.2);
+    } else {
+      seconds += duration * (upscale.target === '8k' ? 14 : upscale.target === '4k' ? 9 : 6);
+    }
   }
 
   if (filterPreset && filterPreset !== 'none') seconds += duration * 1.5;

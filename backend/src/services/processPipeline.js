@@ -3,7 +3,7 @@ import { detectPlatform, isValidUrl } from '../utils/platform.js';
 import { fetchVideoMetadata, resolveDownloadUrl } from './videoService.js';
 import { downloadToFile, extractMetadata, runAiPipeline } from './ffmpegService.js';
 import { processVideoExport } from './mediaProcessingService.js';
-import { upscaleVideo } from './upscaleService.js';
+import { upscaleVideo, checkUpscaleAvailability } from './upscaleService.js';
 import {
   createJob,
   setJobStep,
@@ -32,9 +32,19 @@ export async function startProcessingJob(payload) {
     // use default estimate
   }
 
+  let gpuAvailable = false;
+  try {
+    const upscaleStatus = await checkUpscaleAvailability();
+    gpuAvailable = upscaleStatus.gpu;
+  } catch {
+    // use CPU estimate
+  }
+
   const job = createJob({
     durationSeconds,
-    upscale: modifications.upscale,
+    upscale: modifications.upscale
+      ? { ...modifications.upscale, gpuAvailable }
+      : modifications.upscale,
     filterPreset: modifications.filters?.preset,
     audio: modifications.audio,
     applyWatermark,
@@ -93,18 +103,28 @@ async function runPipeline(jobId, payload) {
   if (modifications.upscale?.enabled) {
     const target = (modifications.upscale.target || '4k').toUpperCase();
     const isFast = modifications.upscale.mode === 'fast';
+    let upscaleStatus = { gpu: false, device: 'cpu' };
+    try {
+      upscaleStatus = await checkUpscaleAvailability();
+    } catch {
+      // keep defaults
+    }
+
     setJobStep(
       jobId,
       'upscale',
       'running',
       isFast
         ? `Fast upscaling to ${target} with FFmpeg…`
-        : `AI upscaling each frame to ${target} — slowest step on CPU…`
+        : upscaleStatus.gpu
+          ? `AI upscaling to ${target} on ${upscaleStatus.device}…`
+          : `AI upscaling each frame to ${target} — slowest step on CPU…`
     );
 
     upscaleResult = await upscaleVideo(localPath, {
       target: modifications.upscale.target || '4k',
       mode: modifications.upscale.mode || 'ai',
+      gpuAvailable: upscaleStatus.gpu,
     });
 
     if (!upscaleResult.skipped) {

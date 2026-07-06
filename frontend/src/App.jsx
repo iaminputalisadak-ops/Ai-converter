@@ -341,15 +341,15 @@ export default function App() {
                         }))
                       }
                     >
-                      <option value="fast">Fast — FFmpeg (~10–60 sec, good for CPU)</option>
-                      <option value="ai">AI Quality — Real-ESRGAN (best detail, very slow on CPU)</option>
+                      <option value="fast">Fast — FFmpeg (~10–60 sec)</option>
+                      <option value="ai">AI Quality — Real-ESRGAN (best detail)</option>
                     </select>
                   </div>
                   <p className="quality-note">
                     {modifications.upscale.mode === 'fast'
                       ? 'Fast mode resizes with FFmpeg Lanczos — finishes in seconds, not true AI detail.'
                       : upscaleStatus?.gpu
-                        ? 'GPU detected — AI Quality mode is recommended.'
+                        ? `GPU detected (${upscaleStatus.device}) — AI 8K typically takes 1–3 min for short reels. Use Fast mode for near-instant results.`
                         : 'No GPU detected — AI Quality can take 10–30+ min for short reels on CPU. Use Fast mode to finish quickly.'}
                   </p>
                 </div>

@@ -7,6 +7,12 @@ export function validateExportOptions({ modifications = {}, applyWatermark = tru
   const errors = [];
   const audio = modifications.audio || {};
   const filterPreset = modifications.filters?.preset || 'none';
+  const hasEnhancements =
+    modifications.denoiseSharpen !== false ||
+    Boolean(modifications.frameInterpolation) ||
+    Boolean(modifications.stabilize) ||
+    Boolean(modifications.styleTransfer) ||
+    Boolean(modifications.hdrTone);
 
   if (audio.enabled) {
     const tracks = listMusicTracks();
@@ -14,7 +20,7 @@ export function validateExportOptions({ modifications = {}, applyWatermark = tru
       errors.push(
         'Background music is enabled but no music files were found. Add MP3 files to backend/assets/music/ and refresh the page.'
       );
-    } else if (!audio.track) {
+    } else if (!audio.track && !audio.randomTrack) {
       errors.push('Background music is enabled — please select a music track from the dropdown.');
     } else {
       const musicPath = path.join(config.assetsDir, 'music', path.basename(audio.track));
@@ -31,7 +37,9 @@ export function validateExportOptions({ modifications = {}, applyWatermark = tru
   const willExport =
     applyWatermark ||
     (filterPreset && filterPreset !== 'none') ||
-    Boolean(audio.enabled);
+    Boolean(audio.enabled) ||
+    Boolean(modifications.fadeTransitions) ||
+    hasEnhancements;
 
   if (!willExport && modifications.upscale?.enabled !== true) {
     errors.push(

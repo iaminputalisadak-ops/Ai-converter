@@ -21,7 +21,9 @@ export const config = {
     backendRoot,
     process.env.WATERMARK_PATH || 'assets/watermark.png'
   ),
-  platformId: process.env.PLATFORM_ID || 'converter-platform',
+  platformId: process.env.PLATFORM_ID || 'Dance.com27',
+  /** 'text' = drawtext on video (recommended). 'image' = PNG overlay. */
+  watermarkMode: (process.env.WATERMARK_MODE || 'text').toLowerCase(),
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   assetsDir: path.join(backendRoot, 'assets'),
   aiUpscaleUrl: process.env.AI_UPSCALE_URL || '',
@@ -45,7 +47,7 @@ async function ensureWatermark() {
       '-f',
       'lavfi',
       '-i',
-      'color=c=black@0.35:s=220x48',
+      'color=c=black@0.35:s=300x48',
       '-vf',
       drawtext,
       '-frames:v',
@@ -78,7 +80,7 @@ async function ensureDefaultMusic() {
       '-i',
       'sine=frequency=294:duration=45',
       '-filter_complex',
-      '[0:a][1:a][2:a]amix=inputs=3:duration=longest,volume=0.18,afade=t=in:st=0:d=3,afade=t=out:st=42:d=3',
+      '[0:a][1:a][2:a]amix=inputs=3:duration=longest,volume=0.55,afade=t=in:st=0:d=3,afade=t=out:st=42:d=3',
       '-c:a',
       'libmp3lame',
       '-q:a',

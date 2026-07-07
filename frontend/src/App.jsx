@@ -80,7 +80,10 @@ export default function App() {
       track: DEFAULT_MUSIC_TRACK,
       volume: 0.25,
       mixWithOriginal: true,
+      ducking: true,
+      randomTrack: false,
     },
+    fadeTransitions: false,
   });
   const [applyWatermark, setApplyWatermark] = useState(true);
   const [upscaleStatus, setUpscaleStatus] = useState(null);
@@ -148,8 +151,8 @@ export default function App() {
       return;
     }
 
-    if (modifications.audio.enabled && !modifications.audio.track) {
-      setError('Select a music track from the dropdown.');
+    if (modifications.audio.enabled && !modifications.audio.track && !modifications.audio.randomTrack) {
+      setError('Select a music track from the dropdown, or enable random track.');
       return;
     }
 
@@ -466,9 +469,23 @@ export default function App() {
                         <select
                           id="music-track"
                           className="quality-select"
-                          value={modifications.audio.track}
-                          onChange={(e) => setAudioOption('track', e.target.value)}
+                          value={modifications.audio.randomTrack ? '__random__' : modifications.audio.track}
+                          onChange={(e) => {
+                            if (e.target.value === '__random__') {
+                              setAudioOption('randomTrack', true);
+                            } else {
+                              setModifications((prev) => ({
+                                ...prev,
+                                audio: {
+                                  ...prev.audio,
+                                  randomTrack: false,
+                                  track: e.target.value,
+                                },
+                              }));
+                            }
+                          }}
                         >
+                          <option value="__random__">Random from library</option>
                           {musicTracks.map((t) => (
                             <option key={t.id} value={t.id}>
                               {t.name}
@@ -501,6 +518,16 @@ export default function App() {
                       />
                       Mix with original audio
                     </label>
+                    {modifications.audio.mixWithOriginal && (
+                      <label className="option-item">
+                        <input
+                          type="checkbox"
+                          checked={modifications.audio.ducking !== false}
+                          onChange={(e) => setAudioOption('ducking', e.target.checked)}
+                        />
+                        Auto-duck music when speech is loud
+                      </label>
+                    )}
                   </div>
                 )}
 
@@ -526,7 +553,7 @@ export default function App() {
                     checked={modifications.frameInterpolation}
                     onChange={() => toggleModification('frameInterpolation')}
                   />
-                  Frame interpolation (2× smoother motion)
+                  Frame smoothing (fast, single-pass)
                 </label>
                 <label className="option-item">
                   <input
@@ -547,15 +574,22 @@ export default function App() {
                 <label className="option-item">
                   <input
                     type="checkbox"
+                    checked={modifications.fadeTransitions}
+                    onChange={() => toggleModification('fadeTransitions')}
+                  />
+                  Fade in / fade out (0.5s)
+                </label>
+                <label className="option-item">
+                  <input
+                    type="checkbox"
                     checked={modifications.objectDetection}
                     onChange={() => toggleModification('objectDetection')}
                   />
-                  Object removal (GPU model — planned)
+                  Advanced object detection (GPU — planned)
                 </label>
                 <p className="quality-note">
-                  Denoise, sharpen, audio enhancement, and auto-thumbnail run automatically on
-                  every processed video. Super-resolution uses Real-ESRGAN when AI upscale is
-                  selected.
+                  All effects run in <strong>one GPU encode</strong> — typical reels finish in 15–45 sec.
+                  Use native 1080p + Fast upscale for best speed. Turn off blur/stabilize for even faster jobs.
                 </p>
               </div>
 

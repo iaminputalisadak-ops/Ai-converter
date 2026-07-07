@@ -1,11 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
 import { detectPlatform, isValidUrl } from '../utils/platform.js';
 import { fetchVideoMetadata, resolveDownloadUrl } from './videoService.js';
 import { downloadToFile, extractMetadata } from './ffmpegService.js';
 import { processVideoExport } from './mediaProcessingService.js';
 import { upscaleVideo, checkUpscaleAvailability, computeUpscaleTarget } from './upscaleService.js';
 import { validateExportOptions } from './exportValidation.js';
-import { runVideoEnhancements } from './videoEnhancementService.js';
+import { runVideoEnhancements, generateThumbnailAsync, needsSeparateEnhancePass } from './videoEnhancementService.js';
 import {
   createJob,
   setJobStep,
@@ -14,6 +15,7 @@ import {
   estimateProcessingMs,
   updateJob,
 } from './jobService.js';
+import { config } from '../config.js';
 
 const MOBILE_UA =
   'Mozilla/5.0 (Linux; Android 11; SM-N975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.210 Mobile Safari/537.36';
@@ -103,24 +105,39 @@ async function runPipeline(jobId, payload) {
 
   setJobStep(jobId, 'analyze', 'completed');
 
-  setJobStep(jobId, 'enhance', 'running', 'Applying quality enhancements (denoise, sharpen, AI options)…');
-  const enhancement = await runVideoEnhancements(localPath, modifications, fileMetadata);
-  let workingPath = enhancement.outputPath;
+  let gpuAvailable = false;
+  try {
+    const upscaleStatus = await checkUpscaleAvailability();
+    gpuAvailable = upscaleStatus.gpu;
+  } catch {
+    // CPU fallback
+  }
+
+  const separateEnhance = needsSeparateEnhancePass(modifications);
   setJobStep(
     jobId,
     'enhance',
-    'completed',
-    enhancement.steps.length
-      ? enhancement.steps.map((s) => s.message).join(' · ')
-      : 'Quality pass complete'
+    'running',
+    separateEnhance
+      ? 'Applying optional AI enhancements…'
+      : 'Preparing single-pass GPU encode (all effects merged)…'
   );
+
+  const enhancement = await runVideoEnhancements(localPath, modifications, fileMetadata);
+  let workingPath = enhancement.outputPath;
+  setJobStep(jobId, 'enhance', 'completed', 'Enhancements queued — starting encode…');
 
   let upscaleResult = null;
 
   const filterPreset = modifications.filters?.preset || 'none';
   const audioOptions = modifications.audio || {};
+  const hasEnhancementFilters = (enhancement.mergeableFilters || []).length > 0;
   const needsExport =
-    applyWatermark || filterPreset !== 'none' || audioOptions.enabled;
+    applyWatermark ||
+    filterPreset !== 'none' ||
+    audioOptions.enabled ||
+    modifications.fadeTransitions ||
+    hasEnhancementFilters;
   const isFastUpscale =
     modifications.upscale?.enabled === true && modifications.upscale.mode === 'fast';
 
@@ -128,12 +145,6 @@ async function runPipeline(jobId, payload) {
     const target = (modifications.upscale.target || '4k').toUpperCase();
     const sourceW = fileMetadata.video?.width;
     const sourceH = fileMetadata.video?.height;
-    let upscaleStatus = { gpu: false, device: 'cpu' };
-    try {
-      upscaleStatus = await checkUpscaleAvailability();
-    } catch {
-      // keep defaults
-    }
 
     const targetDims =
       sourceW && sourceH
@@ -144,7 +155,7 @@ async function runPipeline(jobId, payload) {
       jobId,
       'upscale',
       'running',
-      `Single-pass encode: scale to ${target}, filter & watermark on GPU…`
+      `Single-pass GPU encode: scale to ${target}, filter & watermark…`
     );
 
     const processed = await processVideoExport(workingPath, {
@@ -153,6 +164,9 @@ async function runPipeline(jobId, payload) {
       audio: audioOptions,
       scaleTo: targetDims,
       audioEnhance: enhancement.audioEnhance,
+      fadeTransitions: modifications.fadeTransitions,
+      enhancementFilters: enhancement.mergeableFilters,
+      useGpuScale: gpuAvailable,
     });
 
     workingPath = processed.outputPath;
@@ -175,13 +189,19 @@ async function runPipeline(jobId, payload) {
       platform: platform.id,
       fileMetadata,
       enhancements: enhancement.steps,
-      thumbnail: enhancement.thumbnail,
+      thumbnail: null,
       upscale: upscaleResult,
       ...processed,
       appliedFilter: processed.appliedFilter,
       appliedMusic: processed.appliedMusic,
       outputMetadata: await extractMetadata(processed.outputPath),
     };
+
+    if (modifications.generateThumbnail !== false) {
+      generateThumbnailAsync(processed.outputPath, result.outputMetadata).then((thumb) => {
+        if (thumb) result.thumbnail = thumb;
+      });
+    }
 
     setJobStep(jobId, 'finalize', 'running', 'Saving final file…');
     setJobStep(jobId, 'finalize', 'completed');
@@ -192,12 +212,6 @@ async function runPipeline(jobId, payload) {
   if (modifications.upscale?.enabled === true) {
     const target = (modifications.upscale.target || '4k').toUpperCase();
     const isFast = modifications.upscale.mode === 'fast';
-    let upscaleStatus = { gpu: false, device: 'cpu' };
-    try {
-      upscaleStatus = await checkUpscaleAvailability();
-    } catch {
-      // keep defaults
-    }
 
     setJobStep(
       jobId,
@@ -205,15 +219,15 @@ async function runPipeline(jobId, payload) {
       'running',
       isFast
         ? `Fast upscaling to ${target} with FFmpeg…`
-        : upscaleStatus.gpu
-          ? `AI upscaling to ${target} on ${upscaleStatus.device}…`
+        : gpuAvailable
+          ? `AI upscaling to ${target} on GPU…`
           : `AI upscaling each frame to ${target} — slowest step on CPU…`
     );
 
     upscaleResult = await upscaleVideo(workingPath, {
       target: modifications.upscale.target || '4k',
       mode: modifications.upscale.mode || 'ai',
-      gpuAvailable: upscaleStatus.gpu,
+      gpuAvailable,
     });
 
     if (!upscaleResult.skipped) {
@@ -233,16 +247,20 @@ async function runPipeline(jobId, payload) {
   const filterPresetAfterUpscale = modifications.filters?.preset || 'none';
   const audioOptionsAfterUpscale = modifications.audio || {};
   const needsExportAfterUpscale =
-    applyWatermark || filterPresetAfterUpscale !== 'none' || audioOptionsAfterUpscale.enabled;
+    applyWatermark ||
+    filterPresetAfterUpscale !== 'none' ||
+    audioOptionsAfterUpscale.enabled ||
+    modifications.fadeTransitions ||
+    hasEnhancementFilters;
 
-  setJobStep(jobId, 'export', 'running', 'Encoding video with your selected options…');
+  setJobStep(jobId, 'export', 'running', 'GPU encoding: filter, music & watermark in one pass…');
 
   let result = {
     jobId,
     platform: platform.id,
     fileMetadata,
     enhancements: enhancement.steps,
-    thumbnail: enhancement.thumbnail,
+    thumbnail: null,
     upscale: upscaleResult,
   };
 
@@ -252,6 +270,9 @@ async function runPipeline(jobId, payload) {
       filterPreset: filterPresetAfterUpscale,
       audio: audioOptionsAfterUpscale,
       audioEnhance: enhancement.audioEnhance,
+      fadeTransitions: modifications.fadeTransitions,
+      enhancementFilters: enhancement.mergeableFilters,
+      useGpuScale: gpuAvailable,
     });
     result = {
       ...result,
@@ -272,6 +293,16 @@ async function runPipeline(jobId, payload) {
 
   if (workingPath !== localPath) {
     result.outputMetadata = await extractMetadata(workingPath);
+  }
+
+  if (modifications.generateThumbnail !== false) {
+    const thumbMeta = result.outputMetadata || fileMetadata;
+    const thumbSource = result.outputFilename
+      ? path.join(config.processedDir, result.outputFilename)
+      : workingPath;
+    generateThumbnailAsync(thumbSource, thumbMeta).then((thumb) => {
+      if (thumb) result.thumbnail = thumb;
+    });
   }
 
   setJobStep(jobId, 'finalize', 'completed');

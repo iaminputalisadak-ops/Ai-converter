@@ -80,8 +80,71 @@ export async function applyHdrTone(inputPath) {
   return { outputPath, label: 'HDR-style tone mapping (SDR output)' };
 }
 
+export function getMergeableEnhancementFilters(modifications = {}, meta = {}) {
+  const filters = [];
+
+  if (modifications.denoiseSharpen !== false) {
+    filters.push('hqdn3d=1:0.8:2:1.5', 'unsharp=5:5:0.35:5:5:0.0');
+  }
+  if (modifications.stabilize) {
+    // Stronger + more noticeable stabilization (still single-pass).
+    filters.push('deshake=rx=64:ry=64:edge=mirror');
+  }
+  if (modifications.styleTransfer) {
+    filters.push('eq=contrast=1.14:brightness=0.02:saturation=1.18', 'curves=vintage');
+  }
+  if (modifications.hdrTone) {
+    // More visible HDR-style punch without heavy zscale.
+    filters.push('eq=contrast=1.18:saturation=1.22:brightness=0.03');
+  }
+  if (modifications.frameInterpolation) {
+    const fps = meta?.video?.fps || 30;
+    const targetFps = Math.min(60, Math.round(fps * 2));
+    // dup mode is ~50× faster than full motion-compensated minterpolate
+    filters.push(`minterpolate=fps=${targetFps}:mi_mode=dup`);
+  }
+
+  return filters;
+}
+
+export function needsSeparateEnhancePass() {
+  // All enhancements are merged into the export encode for speed.
+  return false;
+}
+
+export function describeEnhancementSteps(modifications = {}, meta = {}) {
+  const steps = [];
+  if (modifications.denoiseSharpen !== false) {
+    steps.push({ step: 'denoise_sharpen', status: 'completed', message: 'Denoise + sharpen (single pass)' });
+  }
+  if (modifications.stabilize) {
+    steps.push({ step: 'stabilization', status: 'completed', message: 'Stabilization (single pass)' });
+  }
+  if (modifications.frameInterpolation) {
+    const fps = meta?.video?.fps || 30;
+    const targetFps = Math.min(60, Math.round(fps * 2));
+    steps.push({
+      step: 'frame_interpolation',
+      status: 'completed',
+      message: `Frame smoothing ${fps.toFixed(0)}→${targetFps} fps (fast, single pass)`,
+    });
+  }
+  if (modifications.styleTransfer) {
+    steps.push({ step: 'style_transfer', status: 'completed', message: 'Cinematic grade (single pass)' });
+  }
+  if (modifications.hdrTone) {
+    steps.push({ step: 'hdr_tone', status: 'completed', message: 'HDR tone (single pass)' });
+  }
+  return steps;
+}
+
 export function buildAudioEnhanceFilters() {
   return 'highpass=f=80,afftdn=nf=-20,alimiter=limit=0.95,loudnorm=I=-14:TP=-1.5:LRA=11';
+}
+
+/** Lighter chain for BGM mix — loudnorm breaks amix in complex filter graphs. */
+export function buildVoiceMixFilters() {
+  return 'highpass=f=80,alimiter=limit=0.95';
 }
 
 export async function extractThumbnail(inputPath, meta) {
@@ -93,7 +156,7 @@ export async function extractThumbnail(inputPath, meta) {
   await new Promise((resolve, reject) => {
     ffmpeg(inputPath)
       .seekInput(seek)
-      .outputOptions(['-frames:v', '1', '-q:v', '2'])
+      .outputOptions(['-frames:v', '1', '-q:v', '3'])
       .output(thumbPath)
       .on('end', resolve)
       .on('error', reject)
@@ -112,68 +175,32 @@ export async function extractThumbnail(inputPath, meta) {
 }
 
 /**
- * Run enabled enhancement passes (each may re-encode once).
- * Order: stabilize → denoise → frame interp → cinematic grade
+ * Plan enhancements — no separate encode; everything merges into export.
  */
 export async function runVideoEnhancements(inputPath, modifications = {}, meta = {}) {
-  const steps = [];
-  let workingPath = inputPath;
-
-  const runStep = async (enabled, fn, stepId) => {
-    if (!enabled) return;
-    const result = await fn(workingPath, meta);
-    workingPath = result.outputPath;
-    steps.push({ step: stepId, status: 'completed', message: result.label });
-  };
-
-  await runStep(modifications.stabilize, stabilizeVideo, 'stabilization');
-  await runStep(
-    modifications.denoiseSharpen !== false,
-    (p) => denoiseAndSharpen(p),
-    'denoise_sharpen'
-  );
-  await runStep(
-    modifications.frameInterpolation,
-    (p, m) => interpolateFrames(p, m),
-    'frame_interpolation'
-  );
-  await runStep(
-    modifications.styleTransfer,
-    (p) => applyCinematicGrade(p),
-    'style_transfer'
-  );
-  await runStep(modifications.hdrTone, (p) => applyHdrTone(p), 'hdr_tone');
+  const mergeableFilters = getMergeableEnhancementFilters(modifications, meta);
+  const steps = describeEnhancementSteps(modifications, meta);
 
   if (modifications.objectDetection) {
     steps.push({
       step: 'object_detection',
       status: 'planned',
       message:
-        'Object segmentation/removal requires a dedicated GPU model — not enabled in local mode.',
+        'Advanced object detection requires a dedicated GPU model — not enabled in local mode.',
     });
   }
 
-  let thumbnail = null;
-  if (modifications.generateThumbnail !== false) {
-    try {
-      const freshMeta = workingPath === inputPath ? meta : await extractMetadata(workingPath);
-      thumbnail = await extractThumbnail(workingPath, freshMeta);
-      if (thumbnail) {
-        steps.push({
-          step: 'thumbnail',
-          status: 'completed',
-          message: 'Auto-selected engagement thumbnail',
-        });
-      }
-    } catch {
-      // optional
-    }
-  }
-
   return {
-    outputPath: workingPath,
+    outputPath: inputPath,
     steps,
-    thumbnail,
+    mergeableFilters,
     audioEnhance: modifications.audioEnhance !== false,
   };
+}
+
+/** Generate thumbnail without blocking the main pipeline. */
+export function generateThumbnailAsync(inputPath, meta) {
+  return extractThumbnail(inputPath, meta)
+    .then((thumbnail) => thumbnail)
+    .catch(() => null);
 }
